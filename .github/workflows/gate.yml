@@ -24,6 +24,9 @@ permissions: {}
 
 env:
   PYTHONDONTWRITEBYTECODE: '1'
+  # Tree hash of tools/ that every run must see in its trusted (pre-push) copy. A tools change therefore
+  # needs a deliberate edit of this line (a workflow change) and otherwise fails the next run closed.
+  ODIN_TOOLS_TREE: 61a7a5eac33405ad0a6835f5378755e7742b4bfb
 
 jobs:
   gate:  # READ-ONLY. No secrets. Never writes.
@@ -53,6 +56,7 @@ jobs:
           # Gate logic comes from the PRE-push tree (push) so a commit cannot supply its own judge.
           BASE="$GITHUB_SHA"
           if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
+          test "$(git rev-parse "$BASE:tools")" = "$ODIN_TOOLS_TREE" || { echo "tools tree differs from pinned hash" >&2; exit 1; }
           mkdir -p "$RUNNER_TEMP/trusted"
           git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - id: g
@@ -61,7 +65,7 @@ jobs:
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           INPUT_PACKAGE_ID: ${{ inputs.package_id }}
           INPUT_ROUND: ${{ inputs.round }}
-        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -B -m odin_gate gate
+        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -P -B -m odin_gate gate
 
   claim:  # create-only claim tag. Write scope: contents only. No model/other secrets.
     needs: gate
@@ -87,6 +91,7 @@ jobs:
           # Gate logic comes from the PRE-push tree (push) so a commit cannot supply its own judge.
           BASE="$GITHUB_SHA"
           if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
+          test "$(git rev-parse "$BASE:tools")" = "$ODIN_TOOLS_TREE" || { echo "tools tree differs from pinned hash" >&2; exit 1; }
           mkdir -p "$RUNNER_TEMP/trusted"
           git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - id: c
@@ -95,7 +100,7 @@ jobs:
           PACKAGE_ID: ${{ needs.gate.outputs.package_id }}
           ROUND: ${{ needs.gate.outputs.round }}
           AUTHZ_BLOB: ${{ needs.gate.outputs.authz_blob }}
-        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -B -m odin_gate claim
+        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -P -B -m odin_gate claim
 
   worker:  # synthetic echo. READ-ONLY token, no model/deploy secrets, no write path.
     needs: [gate, claim]
@@ -122,6 +127,7 @@ jobs:
           # Gate logic comes from the PRE-push tree (push) so a commit cannot supply its own judge.
           BASE="$GITHUB_SHA"
           if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
+          test "$(git rev-parse "$BASE:tools")" = "$ODIN_TOOLS_TREE" || { echo "tools tree differs from pinned hash" >&2; exit 1; }
           mkdir -p "$RUNNER_TEMP/trusted"
           git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - id: w
@@ -130,7 +136,7 @@ jobs:
           PACKAGE_ID: ${{ needs.gate.outputs.package_id }}
           ROUND: ${{ needs.gate.outputs.round }}
           AUTHZ_BLOB: ${{ needs.gate.outputs.authz_blob }}
-        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -B -m odin_gate worker
+        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -P -B -m odin_gate worker
 
   verify:  # deterministic, read-only
     needs: [gate, worker]
@@ -153,12 +159,13 @@ jobs:
           # Gate logic comes from the PRE-push tree (push) so a commit cannot supply its own judge.
           BASE="$GITHUB_SHA"
           if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
+          test "$(git rev-parse "$BASE:tools")" = "$ODIN_TOOLS_TREE" || { echo "tools tree differs from pinned hash" >&2; exit 1; }
           mkdir -p "$RUNNER_TEMP/trusted"
           git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - env:
           PACKAGE_ID: ${{ needs.gate.outputs.package_id }}
           BUNDLE: ${{ needs.worker.outputs.bundle }}
-        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -B -m odin_gate verify
+        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -P -B -m odin_gate verify
 
   publish:  # narrow write: result branch + evidence tag only. No model secrets.
     needs: [gate, worker, verify]
@@ -181,6 +188,7 @@ jobs:
           # Gate logic comes from the PRE-push tree (push) so a commit cannot supply its own judge.
           BASE="$GITHUB_SHA"
           if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
+          test "$(git rev-parse "$BASE:tools")" = "$ODIN_TOOLS_TREE" || { echo "tools tree differs from pinned hash" >&2; exit 1; }
           mkdir -p "$RUNNER_TEMP/trusted"
           git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - env:
@@ -189,4 +197,4 @@ jobs:
           ROUND: ${{ needs.gate.outputs.round }}
           AUTHZ_BLOB: ${{ needs.gate.outputs.authz_blob }}
           BUNDLE: ${{ needs.worker.outputs.bundle }}
-        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -B -m odin_gate publish
+        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -P -B -m odin_gate publish
