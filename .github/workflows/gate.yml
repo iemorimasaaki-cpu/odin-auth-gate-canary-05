@@ -1,0 +1,162 @@
+name: odin-gate
+run-name: odin-gate ${{ github.event_name }} ${{ github.sha }}
+
+# Enumerated triggers (lint-enforced, see tools/odin_gate/lint_workflows.py):
+#   1. push to main touching authz/** or specs/**   (an Owner-merged authorization PR)
+#   2. workflow_dispatch (Owner only, rounds >= 2, bounded by the approved record)
+# No pull_request*, issue*, comment, label, workflow_run, schedule, or fork-reachable trigger.
+on:
+  push:
+    branches: [main]
+    paths: ['authz/**', 'specs/**']
+  workflow_dispatch:
+    inputs:
+      package_id:
+        description: approved package id (must have an authorization record on main)
+        required: true
+        type: string
+      round:
+        description: remediation round (>= 2)
+        required: true
+        type: string
+
+permissions: {}
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  gate:  # READ-ONLY. No secrets. Never writes.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      decision: ${{ steps.g.outputs.decision }}
+      code: ${{ steps.g.outputs.code }}
+      package_id: ${{ steps.g.outputs.package_id }}
+      round: ${{ steps.g.outputs.round }}
+      authz_blob: ${{ steps.g.outputs.authz_blob }}
+    steps:
+      - name: checkout (no third-party action, no persisted credential)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}"
+          AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$AUTH" fetch -q --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          git checkout -q --detach "$GITHUB_SHA"
+      - id: g
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          INPUT_PACKAGE_ID: ${{ inputs.package_id }}
+          INPUT_ROUND: ${{ inputs.round }}
+        run: PYTHONPATH=tools python3 -B -m odin_gate gate
+
+  claim:  # create-only claim tag. Write scope: contents only. No model/other secrets.
+    needs: gate
+    if: needs.gate.outputs.decision == 'GO'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      claimed: ${{ steps.c.outputs.claimed }}
+    steps:
+      - name: checkout
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}"
+          AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$AUTH" fetch -q --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          git checkout -q --detach "$GITHUB_SHA"
+      - id: c
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PACKAGE_ID: ${{ needs.gate.outputs.package_id }}
+          ROUND: ${{ needs.gate.outputs.round }}
+          AUTHZ_BLOB: ${{ needs.gate.outputs.authz_blob }}
+        run: PYTHONPATH=tools python3 -B -m odin_gate claim
+
+  worker:  # synthetic echo. READ-ONLY token, no model/deploy secrets, no write path.
+    needs: [gate, claim]
+    if: needs.claim.outputs.claimed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: synthetic-worker
+    permissions:
+      contents: read
+    outputs:
+      bundle: ${{ steps.w.outputs.bundle }}
+    steps:
+      - name: checkout
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}"
+          AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$AUTH" fetch -q --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          git checkout -q --detach "$GITHUB_SHA"
+      - id: w
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PACKAGE_ID: ${{ needs.gate.outputs.package_id }}
+          ROUND: ${{ needs.gate.outputs.round }}
+          AUTHZ_BLOB: ${{ needs.gate.outputs.authz_blob }}
+        run: PYTHONPATH=tools python3 -B -m odin_gate worker
+
+  verify:  # deterministic, read-only
+    needs: [gate, worker]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: checkout
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}"
+          AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$AUTH" fetch -q --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          git checkout -q --detach "$GITHUB_SHA"
+      - env:
+          PACKAGE_ID: ${{ needs.gate.outputs.package_id }}
+          BUNDLE: ${{ needs.worker.outputs.bundle }}
+        run: PYTHONPATH=tools python3 -B -m odin_gate verify
+
+  publish:  # narrow write: result branch + evidence tag only. No model secrets.
+    needs: [gate, worker, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: checkout
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}"
+          AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$AUTH" fetch -q --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          git checkout -q --detach "$GITHUB_SHA"
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PACKAGE_ID: ${{ needs.gate.outputs.package_id }}
+          ROUND: ${{ needs.gate.outputs.round }}
+          AUTHZ_BLOB: ${{ needs.gate.outputs.authz_blob }}
+          BUNDLE: ${{ needs.worker.outputs.bundle }}
+        run: PYTHONPATH=tools python3 -B -m odin_gate publish
