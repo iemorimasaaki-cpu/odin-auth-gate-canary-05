@@ -57,6 +57,9 @@ jobs:
           BASE="$GITHUB_SHA"
           if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
           test "$(git rev-parse "$BASE:tools")" = "$ODIN_TOOLS_TREE" || { echo "tools tree differs from pinned hash" >&2; exit 1; }
+          # info/attributes outranks tree attributes: no export-ignore/eol/encoding rewriting of the pinned bytes
+          mkdir -p .git/info
+          printf '* -export-ignore -export-subst -text -eol -ident -filter -working-tree-encoding\n' > .git/info/attributes
           mkdir -p "$RUNNER_TEMP/trusted"
           git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - id: g
@@ -92,6 +95,9 @@ jobs:
           BASE="$GITHUB_SHA"
           if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
           test "$(git rev-parse "$BASE:tools")" = "$ODIN_TOOLS_TREE" || { echo "tools tree differs from pinned hash" >&2; exit 1; }
+          # info/attributes outranks tree attributes: no export-ignore/eol/encoding rewriting of the pinned bytes
+          mkdir -p .git/info
+          printf '* -export-ignore -export-subst -text -eol -ident -filter -working-tree-encoding\n' > .git/info/attributes
           mkdir -p "$RUNNER_TEMP/trusted"
           git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - id: c
@@ -128,6 +134,9 @@ jobs:
           BASE="$GITHUB_SHA"
           if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
           test "$(git rev-parse "$BASE:tools")" = "$ODIN_TOOLS_TREE" || { echo "tools tree differs from pinned hash" >&2; exit 1; }
+          # info/attributes outranks tree attributes: no export-ignore/eol/encoding rewriting of the pinned bytes
+          mkdir -p .git/info
+          printf '* -export-ignore -export-subst -text -eol -ident -filter -working-tree-encoding\n' > .git/info/attributes
           mkdir -p "$RUNNER_TEMP/trusted"
           git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - id: w
@@ -160,6 +169,9 @@ jobs:
           BASE="$GITHUB_SHA"
           if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
           test "$(git rev-parse "$BASE:tools")" = "$ODIN_TOOLS_TREE" || { echo "tools tree differs from pinned hash" >&2; exit 1; }
+          # info/attributes outranks tree attributes: no export-ignore/eol/encoding rewriting of the pinned bytes
+          mkdir -p .git/info
+          printf '* -export-ignore -export-subst -text -eol -ident -filter -working-tree-encoding\n' > .git/info/attributes
           mkdir -p "$RUNNER_TEMP/trusted"
           git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - env:
@@ -189,6 +201,9 @@ jobs:
           BASE="$GITHUB_SHA"
           if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
           test "$(git rev-parse "$BASE:tools")" = "$ODIN_TOOLS_TREE" || { echo "tools tree differs from pinned hash" >&2; exit 1; }
+          # info/attributes outranks tree attributes: no export-ignore/eol/encoding rewriting of the pinned bytes
+          mkdir -p .git/info
+          printf '* -export-ignore -export-subst -text -eol -ident -filter -working-tree-encoding\n' > .git/info/attributes
           mkdir -p "$RUNNER_TEMP/trusted"
           git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - env:

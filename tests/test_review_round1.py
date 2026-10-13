@@ -195,3 +195,89 @@ class Round2Tests(unittest.TestCase):
         with self.assertRaises(Reject) as cm:
             publish.run_publish(env, api, r.d, b, NOW)
         self.assertEqual(cm.exception.code, "ALREADY_PUBLISHED")
+
+
+class CheckoutStepTests(unittest.TestCase):
+    """Execute the real workflow checkout/pin/archive script against local repos (no network)."""
+    ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+
+    def script(self):
+        import yaml
+        wf = yaml.safe_load(open(os.path.join(self.ROOT, ".github/workflows/gate.yml")))
+        out = {}
+        for job, jd in wf["jobs"].items():
+            out[job] = jd["steps"][0]["run"]
+        lines = []
+        for line in out["gate"].splitlines():
+            if line.lstrip().startswith('git -c "http.extraheader=$AUTH" fetch'):
+                line = "          git fetch -q --no-tags \"$LOCAL_SRC\" '+refs/heads/main:refs/remotes/origin/main'"
+            lines.append(line)
+        return "\n".join(lines), out
+
+    def run_step(self, src, work, before, after, pin, script=None):
+        import tempfile
+        script = script or self.script()[0]
+        runner_tmp = os.path.join(work, "_rt"); os.makedirs(runner_tmp)
+        wd = os.path.join(work, "ws"); os.makedirs(wd)
+        env = {"PATH": os.environ["PATH"], "HOME": work, "GITHUB_REPOSITORY": "iemorimasaaki-cpu/odin-auth-gate-canary-05",
+               "GITHUB_TOKEN": "x", "BEFORE_SHA": before, "GITHUB_SHA": after, "RUNNER_TEMP": runner_tmp,
+               "ODIN_TOOLS_TREE": pin, "LOCAL_SRC": src, "GIT_CONFIG_GLOBAL": "/dev/null"}
+        r = subprocess.run(["bash", "-c", script], cwd=wd, env=env, capture_output=True, text=True)
+        return r, runner_tmp
+
+    def make_src(self):
+        r = Repo()
+        r.write("tools/odin_gate/gate.py", "VERSION = 'good'\r\nline2\n")
+        r.write("tools/odin_gate/other.py", "x = 1\n")
+        before = r.commit("tools")
+        pin = sh(r.d, "git", "rev-parse", "HEAD:tools")
+        return r, before, pin
+
+    def read(self, rt, rel):
+        return open(os.path.join(rt, "trusted", "tools", rel), "rb").read()
+
+    def test_good_pin_extracts_before_tools_and_all_jobs_share_the_step(self):
+        import tempfile
+        r, before, pin = self.make_src()
+        r.write("tools/odin_gate/gate.py", "VERSION = 'EVIL'\n")  # pushed commit swaps the gate
+        after = r.commit("evil tools only")
+        with tempfile.TemporaryDirectory() as w:
+            res, rt = self.run_step(r.d, w, before, after, pin)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(self.read(rt, "odin_gate/gate.py"), b"VERSION = 'good'\r\nline2\n")
+        _, per_job = self.script()
+        self.assertEqual(len({v.replace(chr(10), "") for v in per_job.values()}), 1)
+
+    def test_wrong_pin_fails_closed(self):
+        import tempfile
+        r, before, pin = self.make_src()
+        after = r.commit("noop")
+        with tempfile.TemporaryDirectory() as w:
+            res, rt = self.run_step(r.d, w, before, after, "0" * 40)
+            self.assertNotEqual(res.returncode, 0)
+            self.assertFalse(os.path.exists(os.path.join(rt, "trusted")))
+
+    def test_pushed_commit_tools_change_fails_when_it_becomes_before(self):
+        import tempfile
+        r, before, pin = self.make_src()
+        r.write("tools/odin_gate/gate.py", "VERSION = 'EVIL'\n")
+        evil = r.commit("evil tools only")
+        r.write("authz/x.json", "{}")
+        after = r.commit("next launch")
+        with tempfile.TemporaryDirectory() as w:
+            res, _ = self.run_step(r.d, w, evil, after, pin)  # before == tampered commit
+            self.assertNotEqual(res.returncode, 0)
+
+    def test_hostile_gitattributes_cannot_alter_extracted_bytes(self):
+        import tempfile
+        r, before, pin = self.make_src()
+        r.write(".gitattributes", "tools/odin_gate/gate.py export-ignore\ntools/odin_gate/other.py eol=crlf\n"
+                                  "tools/odin_gate/other.py export-subst\n")
+        after = r.commit("hostile attributes")
+        before_with_attrs = after
+        r.write("README.md", "touch\n"); after2 = r.commit("launch")
+        with tempfile.TemporaryDirectory() as w:
+            res, rt = self.run_step(r.d, w, before_with_attrs, after2, pin)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(self.read(rt, "odin_gate/gate.py"), b"VERSION = 'good'\r\nline2\n")
+            self.assertEqual(self.read(rt, "odin_gate/other.py"), b"x = 1\n")
