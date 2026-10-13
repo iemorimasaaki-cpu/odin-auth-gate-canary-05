@@ -1,7 +1,9 @@
+import atexit
 import base64
 import datetime
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,7 +19,9 @@ PKG = "demo-package"
 
 
 def sh(cwd, *args, env=None):
-    e = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    e = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t",
+             GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="commit.gpgsign", GIT_CONFIG_VALUE_0="false",
+             GIT_CONFIG_GLOBAL="/dev/null")  # throwaway repos must never use the real signing service
     return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True, env=e).stdout.strip()
 
 
@@ -35,7 +39,10 @@ class Repo:
     """Local git repo with a base commit and helpers to add commits."""
 
     def __init__(self):
-        self.d = tempfile.mkdtemp(prefix="odin-t-")
+        self.root = tempfile.mkdtemp(prefix="odin-t-")
+        atexit.register(shutil.rmtree, self.root, True)
+        self.d = os.path.join(self.root, "repo")
+        os.mkdir(self.d)
         sh(self.d, "git", "init", "-q", "-b", "main")
         os.makedirs(os.path.join(self.d, ".github/workflows"))
         self.write(".github/workflows/gate.yml", "name: x\n")
@@ -141,7 +148,7 @@ class FakeAPI:
 
 
 def push_env(repo, before, after, **over):
-    ev = os.path.join(repo.d, "..", f"ev-{after}.json")
+    ev = os.path.join(repo.root, f"ev-{after}.json")
     with open(ev, "w") as f:
         json.dump({"before": before, "after": after}, f)
     env = {"GITHUB_REPOSITORY": EXPECTED_REPO, "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main",

@@ -133,6 +133,8 @@ if __name__ == "__main__":
 class Round2Tests(unittest.TestCase):
     ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
+    @unittest.skipUnless(os.path.isdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".git")),
+                         "needs the git checkout (mutation sandboxes have none; pin is checked in the real run)")
     def test_pinned_tools_tree_matches_repo(self):
         import re
         wf = open(os.path.join(self.ROOT, ".github/workflows/gate.yml")).read()
@@ -145,8 +147,8 @@ class Round2Tests(unittest.TestCase):
         self.assertEqual(pin.group(1), out)
 
     def test_cwd_shadow_module_is_not_loaded_with_dash_P(self):
-        import tempfile
-        d = tempfile.mkdtemp(); marker = os.path.join(d, "PWNED")
+        import atexit, shutil, tempfile
+        d = tempfile.mkdtemp(); atexit.register(shutil.rmtree, d, True); marker = os.path.join(d, "PWNED")
         for mod in ("json", "base64", "re", "subprocess", "hashlib", "datetime"):
             open(os.path.join(d, mod + ".py"), "w").write(f"open({marker!r}, 'w').write('x')\n")
         tools = os.path.join(self.ROOT, "tools")

@@ -55,6 +55,15 @@ MUTS = [
 def main():
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     survived = []
+    # guard: the unmutated sandbox MUST be green, otherwise every mutation would count as "killed" for the wrong reason
+    tmp0 = tempfile.mkdtemp()
+    shutil.copytree(root, tmp0, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+    r0 = subprocess.run([sys.executable, "-W", "ignore", "-m", "unittest", "discover", "-s", "tests", "-t", "tests"],
+                        cwd=tmp0, capture_output=True, text=True, env=dict(os.environ, PYTHONPATH=os.path.join(tmp0, "tools") + ":" + os.path.join(tmp0, "tests"), PYTHONDONTWRITEBYTECODE="1"))
+    shutil.rmtree(tmp0)
+    if r0.returncode != 0:
+        print("BASELINE-RED: unmutated sandbox fails; mutation results would be meaningless\n" + r0.stderr[-1500:])
+        return 2
     for f, old, new in MUTS:
         tmp = tempfile.mkdtemp()
         shutil.copytree(root, tmp, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git", "__pycache__"))

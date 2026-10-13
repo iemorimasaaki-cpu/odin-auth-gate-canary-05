@@ -14,10 +14,11 @@ WF = os.path.join(ROOT, ".github/workflows/gate.yml")
 
 class LintTests(unittest.TestCase):
     def lint_text(self, text):
-        d = tempfile.mkdtemp()
-        p = os.path.join(d, "w.yml")
-        open(p, "w").write(text)
-        return lint_workflows.lint(p)[0]
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "w.yml")
+            with open(p, "w") as f:
+                f.write(text)
+            return lint_workflows.lint(p)[0]
 
     def test_real_workflows_clean(self):
         probs, reps = lint_workflows.lint_all(os.path.join(ROOT, ".github/workflows/*.y*ml"))
