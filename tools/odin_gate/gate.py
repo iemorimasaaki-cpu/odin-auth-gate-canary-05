@@ -2,10 +2,14 @@
 import json
 import os
 import re
+import time
 
 from .common import (AUTHZ_PATH_RE, EXPECTED_REPO, OWNER_LOGIN, PKG_RE, SPEC_PATH_RE, ZERO_SHA, Reject,
-                     claim_ref, git, live_check, load_json_strict, sha256_hex, summary, utcnow,
+                     claim_ref, git, live_check, load_json_strict, read_tree_file, sha256_hex, summary, utcnow,
                      validate_record, write_output)
+
+
+PULL_RETRY_SLEEP = (2, 5)  # seconds before 2nd/3rd lookup: commits/{sha}/pulls can lag the push
 
 
 def changed_files(repo_dir, before, after):
@@ -37,13 +41,22 @@ def classify_push(changes):
 
 
 def check_provenance(api, sha):
-    pulls = api.commit_pulls(sha)
-    prs = [p for p in pulls if p.get("merged_at") and p.get("base", {}).get("ref") == "main"]
+    prs = []
+    for delay in (0,) + tuple(PULL_RETRY_SLEEP):
+        time.sleep(delay)
+        prs = [p for p in api.commit_pulls(sha) if p.get("merged_at") and p.get("base", {}).get("ref") == "main"]
+        if prs:
+            break
     if not prs:
         raise Reject("NO_PR", "commit is not the result of a merged PR into main")
-    pr = api.get_pull(prs[0]["number"])
-    if not pr.get("merged") or pr.get("merge_commit_sha") != sha:
-        raise Reject("NOT_MERGE_COMMIT", f"PR #{pr.get('number')} merge_commit_sha != pushed sha")
+    pr = None
+    for cand in prs:
+        full = api.get_pull(cand["number"])
+        if full.get("merged") and full.get("merge_commit_sha") == sha:
+            pr = full
+            break
+    if pr is None:
+        raise Reject("NOT_MERGE_COMMIT", "no merged PR has merge_commit_sha == pushed sha")
     merger = (pr.get("merged_by") or {}).get("login")
     if merger != OWNER_LOGIN:
         raise Reject("MERGER_MISMATCH", f"merged_by={merger!r}")
@@ -101,10 +114,10 @@ def _evaluate(env, api, repo_dir, now, d):
         d["pr"], d["merged_by"] = (lambda n, m: (str(n), m))(*check_provenance(api, sha))
         rnd = 1
         d["package_id"] = pkg
-        rec_text = open(os.path.join(repo_dir, f"authz/{pkg}.json")).read()
+        rec_text = read_tree_file(repo_dir, sha, f"authz/{pkg}.json").decode()
         rec_raw = load_json_strict(rec_text, "authz record")
         if kind == "REVOKE_CANDIDATE":
-            prev = load_json_strict(git("show", f"{before}:authz/{pkg}.json", cwd=repo_dir).stdout, "prior record")
+            prev = load_json_strict(read_tree_file(repo_dir, before, f"authz/{pkg}.json").decode(), "prior record")
             same = {k: v for k, v in prev.items() if k != "status"} == {k: v for k, v in rec_raw.items() if k != "status"}
             if rec_raw.get("status") == "revoked" and prev.get("status") == "approved" and same:
                 raise Reject("REVOKE_RECORDED", "valid revocation; no worker launched")
@@ -120,14 +133,11 @@ def _evaluate(env, api, repo_dir, now, d):
         except ValueError:
             raise Reject("ROUND_INVALID", "round input")
         d["merged_by"] = ""
-        if env.get("GITHUB_ACTOR") != OWNER_LOGIN or env.get("TRIGGERING_ACTOR", OWNER_LOGIN) != OWNER_LOGIN:
+        if env.get("GITHUB_ACTOR") != OWNER_LOGIN or env.get("TRIGGERING_ACTOR", "") != OWNER_LOGIN:
             raise Reject("ACTOR_MISMATCH", f"actor={env.get('GITHUB_ACTOR')}")
         if rnd < 2:
             raise Reject("ROUND_INVALID", "dispatch is for remediation rounds >= 2 only")
-        p = os.path.join(repo_dir, f"authz/{pkg}.json")
-        if not os.path.exists(p):
-            raise Reject("NO_AUTHZ", "no record for package on this commit")
-        rec_text = open(p).read()
+        rec_text = read_tree_file(repo_dir, sha, f"authz/{pkg}.json").decode()
         rec_raw = load_json_strict(rec_text, "authz record")
         allowed = [AUTHZ_PATH_RE, SPEC_PATH_RE]
     d["round"] = rnd
@@ -137,10 +147,7 @@ def _evaluate(env, api, repo_dir, now, d):
     if rnd > rec["max_rounds"]:
         raise Reject("ROUND_LIMIT", f"round {rnd} > max_rounds {rec['max_rounds']}")
     check_baseline(repo_dir, rec, sha, allowed)
-    spec_file = os.path.join(repo_dir, rec["spec_path"])
-    if not os.path.isfile(spec_file) or os.path.islink(spec_file):
-        raise Reject("SPEC_MISMATCH", "spec file missing")
-    if sha256_hex(open(spec_file, "rb").read()) != rec["spec_sha256"]:
+    if sha256_hex(read_tree_file(repo_dir, sha, rec["spec_path"])) != rec["spec_sha256"]:
         raise Reject("SPEC_MISMATCH", "spec sha256 differs from record")
     if rnd > 1:
         prev_sha = api.get_ref_sha(f"tags/{claim_ref(pkg, rnd - 1)}")

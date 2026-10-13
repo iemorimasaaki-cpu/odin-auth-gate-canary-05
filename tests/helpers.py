@@ -10,6 +10,8 @@ import threading
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from odin_gate.common import (ApiError, EXPECTED_REPO, OWNER_LOGIN, sha256_hex)  # noqa: E402
 
+from odin_gate import gate as _gate  # noqa: E402
+_gate.PULL_RETRY_SLEEP = (0, 0)
 NOW = datetime.datetime(2026, 10, 14, 0, 0, 0)
 PKG = "demo-package"
 
@@ -86,7 +88,7 @@ class FakeAPI:
             return True
 
     def get_contents(self, path, ref):
-        assert ref == "main"
+        assert ref == "refs/heads/main"
         return self.main_contents.get(path)
 
     def set_main_record(self, repo, pkg=PKG):
@@ -116,15 +118,16 @@ class FakeAPI:
         return self.tags[sha]
 
     def create_blob(self, b64):
-        i = self._id()
-        self.blobs[i] = base64.b64decode(b64)
+        raw = base64.b64decode(b64)
+        i = "blob" + sha256_hex(raw)[:36]  # content-addressed like git
+        self.blobs[i] = raw
         return i
 
     def get_commit_tree(self, sha):
-        return "t" * 40
+        return self.commit_objs[sha][1] if sha in self.commit_objs else "t" * 40
 
     def create_tree(self, base, entries):
-        i = self._id()
+        i = "tree" + sha256_hex(json.dumps(entries, sort_keys=True).encode())[:36]
         self.trees[i] = entries
         return i
 

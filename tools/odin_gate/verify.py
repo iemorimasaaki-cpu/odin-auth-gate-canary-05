@@ -2,12 +2,13 @@
 import base64
 import json
 import os
-import posixpath
+import re
 
-from .common import (FORBIDDEN_NAMES, FORBIDDEN_PREFIXES, EXPECTED_REPO, Reject, load_json_strict, norm_rel_path,
-                     sha256_hex, summary, utcnow, validate_record)
+from .common import (FORBIDDEN_PREFIXES, EXPECTED_REPO, Reject, load_json_strict, norm_rel_path,
+                     read_tree_file, sha256_hex, summary, utcnow, validate_record)
 
 MAX_BUNDLE_CHARS = 120_000
+SEG_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")  # ASCII lowercase only: no case/Unicode/NTFS tricks
 
 
 def decode_bundle(text):
@@ -40,20 +41,14 @@ def verify_files(files, rec):
         raise Reject("EMPTY_OUTPUT", "")
     if len(files) > rec["max_files"]:
         raise Reject("TOO_MANY_FILES", f"{len(files)} > {rec['max_files']}")
-    total, seen_fold, manifest = 0, {}, []
+    total, manifest = 0, []
     scopes = [norm_rel_path(s) for s in rec["scope_paths"]]
     for path, raw in sorted(files.items()):
-        n = norm_rel_path(path)
-        if n is None or n != path:
-            raise Reject("BAD_PATH", repr(path))
-        if path.endswith("/") or path in FORBIDDEN_NAMES or any(seg in FORBIDDEN_NAMES for seg in path.split("/")):
-            raise Reject("FORBIDDEN_PATH", path)
         if any(path.startswith(p) for p in FORBIDDEN_PREFIXES):
             raise Reject("FORBIDDEN_PATH", path)
-        fold = posixpath.normpath(path).casefold()
-        if fold in seen_fold:
-            raise Reject("PATH_COLLISION", f"{path} vs {seen_fold[fold]}")
-        seen_fold[fold] = path
+        segs = path.split("/")
+        if len(path) > 200 or not all(SEG_RE.match(s) and not s.endswith(".") and not s.startswith("git~") for s in segs):
+            raise Reject("BAD_PATH", repr(path))
         if not any(path == s or path.startswith(s + "/") for s in scopes):
             raise Reject("OUT_OF_SCOPE", path)
         total += len(raw)
@@ -66,7 +61,7 @@ def verify_files(files, rec):
 def run_verify(env, repo_dir, bundle_text, now=None):
     now = now or utcnow()
     pkg = env["PACKAGE_ID"]
-    rec = validate_record(load_json_strict(open(os.path.join(repo_dir, f"authz/{pkg}.json")).read(), "record"), pkg, now)
+    rec = validate_record(load_json_strict(read_tree_file(repo_dir, env.get("GITHUB_SHA", "HEAD"), f"authz/{pkg}.json").decode(), "record"), pkg, now)
     files = decode_bundle(bundle_text)
     return rec, files, verify_files(files, rec)
 

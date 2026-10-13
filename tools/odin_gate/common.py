@@ -11,12 +11,12 @@ import urllib.request
 
 EXPECTED_REPO = "iemorimasaaki-cpu/odin-auth-gate-canary-05"
 OWNER_LOGIN = "iemorimasaaki-cpu"
-PKG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,39}$")
-SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+PKG_RE = re.compile(r"[a-z0-9][a-z0-9-]{2,39}\Z")
+SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
+SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 ZERO_SHA = "0" * 40
-AUTHZ_PATH_RE = re.compile(r"^authz/([a-z0-9][a-z0-9-]{2,39})\.json$")
-SPEC_PATH_RE = re.compile(r"^specs/([a-z0-9][a-z0-9-]{2,39})\.md$")
+AUTHZ_PATH_RE = re.compile(r"authz/([a-z0-9][a-z0-9-]{2,39})\.json\Z")
+SPEC_PATH_RE = re.compile(r"specs/([a-z0-9][a-z0-9-]{2,39})\.md\Z")
 TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
 MAX_WINDOW = datetime.timedelta(days=7)
 SKEW = datetime.timedelta(seconds=300)
@@ -139,6 +139,22 @@ def git(*args, cwd=".", check=True):
     return r
 
 
+def read_tree_file(repo_dir, sha, path):
+    """Bytes of a regular file (mode 100644) at <sha>:<path>, read from the git object, never the worktree."""
+    ls = git("ls-tree", "-z", sha, "--", path, cwd=repo_dir, check=False).stdout
+    ents = [e for e in ls.split("\0") if e]
+    if len(ents) != 1:
+        raise Reject("NO_AUTHZ" if path.startswith("authz/") else "SPEC_MISMATCH", f"{path} missing at {sha[:8]}")
+    meta, name = ents[0].split("\t", 1)
+    mode, typ, _ = meta.split(" ")
+    if name != path or mode != "100644" or typ != "blob":
+        raise Reject("BAD_FILE_MODE", f"{path} mode={mode} type={typ}")
+    r = subprocess.run(["git", "cat-file", "blob", f"{sha}:{path}"], cwd=repo_dir, capture_output=True)
+    if r.returncode != 0:
+        raise Reject("BAD_FILE_MODE", path)
+    return r.stdout
+
+
 class ApiError(Exception):
     def __init__(self, status, body):
         super().__init__(f"HTTP {status}: {body[:200]}")
@@ -233,7 +249,7 @@ def evidence_ref(pkg, rnd):
 
 def live_check(api, pkg, expected_blob):
     """Re-read the authorization record from main NOW. Raises Reject on revoke/stale."""
-    cur = api.get_contents(f"authz/{pkg}.json", "main")
+    cur = api.get_contents(f"authz/{pkg}.json", "refs/heads/main")
     if cur is None:
         raise Reject("REVOKED", "record missing on main")
     blob, text = cur

@@ -38,7 +38,8 @@ class WorkerRunTests(unittest.TestCase):
         with self.assertRaises(Reject) as cm:
             worker_echo.run_worker(env, api, r.d, NOW)
         self.assertEqual(cm.exception.code, "REVOKED")
-        r.write(f"specs/{PKG}.md", "tampered")
+        r.write(f"specs/{PKG}.md", "tampered"); r.commit("tamper")
+        api.main_contents[f"authz/{PKG}.json"] = (blob, json.dumps(json.loads(open(r.d + f"/authz/{PKG}.json").read())))
         with self.assertRaises(Reject) as cm:
             worker_echo.run_worker(env, api, r.d, NOW)
         self.assertEqual(cm.exception.code, "SPEC_MISMATCH")

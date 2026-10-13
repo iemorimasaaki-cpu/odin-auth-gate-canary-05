@@ -57,7 +57,7 @@ class VerifyTests(unittest.TestCase):
         self.assertEqual(code(self.v, cases["OUT_OF_SCOPE2"]), "OUT_OF_SCOPE")
         self.assertEqual(code(self.v, cases["TOO_LARGE"]), "TOO_LARGE")
         self.assertEqual(code(self.v, cases["TOO_MANY_FILES"]), "TOO_MANY_FILES")
-        self.assertEqual(code(self.v, cases["PATH_COLLISION"]), "PATH_COLLISION")
+        self.assertEqual(code(self.v, cases["PATH_COLLISION"]), "BAD_PATH")  # uppercase is outside the ASCII-lowercase allowlist
         self.assertEqual(code(self.v, cases["FORBIDDEN_PATH"]), "FORBIDDEN_PATH")
         self.assertEqual(code(self.v, cases["BAD_PATH"]), "BAD_PATH")
 

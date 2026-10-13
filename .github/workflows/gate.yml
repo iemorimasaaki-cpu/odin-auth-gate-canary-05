@@ -39,9 +39,10 @@ jobs:
       round: ${{ steps.g.outputs.round }}
       authz_blob: ${{ steps.g.outputs.authz_blob }}
     steps:
-      - name: checkout (no third-party action, no persisted credential)
+      - name: checkout + trusted tool copy (no third-party action, no persisted credential)
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           git init -q .
@@ -49,13 +50,18 @@ jobs:
           AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
           git -c "http.extraheader=$AUTH" fetch -q --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           git checkout -q --detach "$GITHUB_SHA"
+          # Gate logic comes from the PRE-push tree (push) so a commit cannot supply its own judge.
+          BASE="$GITHUB_SHA"
+          if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
+          mkdir -p "$RUNNER_TEMP/trusted"
+          git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - id: g
         env:
           GITHUB_TOKEN: ${{ github.token }}
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           INPUT_PACKAGE_ID: ${{ inputs.package_id }}
           INPUT_ROUND: ${{ inputs.round }}
-        run: PYTHONPATH=tools python3 -B -m odin_gate gate
+        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -B -m odin_gate gate
 
   claim:  # create-only claim tag. Write scope: contents only. No model/other secrets.
     needs: gate
@@ -67,9 +73,10 @@ jobs:
     outputs:
       claimed: ${{ steps.c.outputs.claimed }}
     steps:
-      - name: checkout
+      - name: checkout + trusted tool copy (no third-party action, no persisted credential)
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           git init -q .
@@ -77,13 +84,18 @@ jobs:
           AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
           git -c "http.extraheader=$AUTH" fetch -q --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           git checkout -q --detach "$GITHUB_SHA"
+          # Gate logic comes from the PRE-push tree (push) so a commit cannot supply its own judge.
+          BASE="$GITHUB_SHA"
+          if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
+          mkdir -p "$RUNNER_TEMP/trusted"
+          git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - id: c
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PACKAGE_ID: ${{ needs.gate.outputs.package_id }}
           ROUND: ${{ needs.gate.outputs.round }}
           AUTHZ_BLOB: ${{ needs.gate.outputs.authz_blob }}
-        run: PYTHONPATH=tools python3 -B -m odin_gate claim
+        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -B -m odin_gate claim
 
   worker:  # synthetic echo. READ-ONLY token, no model/deploy secrets, no write path.
     needs: [gate, claim]
@@ -96,9 +108,10 @@ jobs:
     outputs:
       bundle: ${{ steps.w.outputs.bundle }}
     steps:
-      - name: checkout
+      - name: checkout + trusted tool copy (no third-party action, no persisted credential)
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           git init -q .
@@ -106,13 +119,18 @@ jobs:
           AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
           git -c "http.extraheader=$AUTH" fetch -q --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           git checkout -q --detach "$GITHUB_SHA"
+          # Gate logic comes from the PRE-push tree (push) so a commit cannot supply its own judge.
+          BASE="$GITHUB_SHA"
+          if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
+          mkdir -p "$RUNNER_TEMP/trusted"
+          git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - id: w
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PACKAGE_ID: ${{ needs.gate.outputs.package_id }}
           ROUND: ${{ needs.gate.outputs.round }}
           AUTHZ_BLOB: ${{ needs.gate.outputs.authz_blob }}
-        run: PYTHONPATH=tools python3 -B -m odin_gate worker
+        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -B -m odin_gate worker
 
   verify:  # deterministic, read-only
     needs: [gate, worker]
@@ -121,9 +139,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: checkout
+      - name: checkout + trusted tool copy (no third-party action, no persisted credential)
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           git init -q .
@@ -131,10 +150,15 @@ jobs:
           AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
           git -c "http.extraheader=$AUTH" fetch -q --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           git checkout -q --detach "$GITHUB_SHA"
+          # Gate logic comes from the PRE-push tree (push) so a commit cannot supply its own judge.
+          BASE="$GITHUB_SHA"
+          if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
+          mkdir -p "$RUNNER_TEMP/trusted"
+          git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - env:
           PACKAGE_ID: ${{ needs.gate.outputs.package_id }}
           BUNDLE: ${{ needs.worker.outputs.bundle }}
-        run: PYTHONPATH=tools python3 -B -m odin_gate verify
+        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -B -m odin_gate verify
 
   publish:  # narrow write: result branch + evidence tag only. No model secrets.
     needs: [gate, worker, verify]
@@ -143,9 +167,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: checkout
+      - name: checkout + trusted tool copy (no third-party action, no persisted credential)
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           git init -q .
@@ -153,10 +178,15 @@ jobs:
           AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
           git -c "http.extraheader=$AUTH" fetch -q --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           git checkout -q --detach "$GITHUB_SHA"
+          # Gate logic comes from the PRE-push tree (push) so a commit cannot supply its own judge.
+          BASE="$GITHUB_SHA"
+          if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' && [ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]; then BASE="$BEFORE_SHA"; fi
+          mkdir -p "$RUNNER_TEMP/trusted"
+          git archive "$BASE" tools | tar -x -C "$RUNNER_TEMP/trusted"
       - env:
           GITHUB_TOKEN: ${{ github.token }}
           PACKAGE_ID: ${{ needs.gate.outputs.package_id }}
           ROUND: ${{ needs.gate.outputs.round }}
           AUTHZ_BLOB: ${{ needs.gate.outputs.authz_blob }}
           BUNDLE: ${{ needs.worker.outputs.bundle }}
-        run: PYTHONPATH=tools python3 -B -m odin_gate publish
+        run: PYTHONPATH="$RUNNER_TEMP/trusted/tools" python3 -B -m odin_gate publish

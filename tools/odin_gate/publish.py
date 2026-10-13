@@ -34,7 +34,13 @@ def run_publish(env, api, repo_dir, bundle_text, now=None):
     commit = api.create_commit(f"ODIN synthetic output {pkg} r{rnd}", tree, [baseline])
     branch = f"odin/{pkg}/r{rnd}"
     if not api.create_ref(f"refs/heads/{branch}", commit):
-        raise Reject("ALREADY_PUBLISHED", branch)
+        # Partial-failure resume: accept an existing branch only if it holds exactly the verified tree
+        # on the approved baseline and no evidence exists yet; otherwise it is a genuine duplicate.
+        existing = api.get_ref_sha(f"heads/{branch}")
+        if existing is None or api.get_commit_tree(existing) != tree or \
+                api.get_ref_sha(f"tags/{evidence_ref(pkg, rnd)}") is not None:
+            raise Reject("ALREADY_PUBLISHED", branch)
+        commit = existing
     evidence = {
         "kind": "evidence", "package_id": pkg, "round": rnd, "authz_blob_sha": blob,
         "spec_sha256": rec["spec_sha256"], "baseline_sha": baseline, "launch_sha": env["GITHUB_SHA"],

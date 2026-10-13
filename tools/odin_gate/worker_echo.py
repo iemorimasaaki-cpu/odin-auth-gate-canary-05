@@ -10,9 +10,9 @@ import re
 import time
 
 from .common import (EXPECTED_REPO, Reject, GitHubAPI, live_check, load_json_strict, sha256_hex, summary,
-                     utcnow, validate_record, write_output)
+                     utcnow, validate_record, write_output, read_tree_file)
 
-FIXTURES = {"echo", "slow", "out-of-scope", "oversize", "forbidden-path", "too-many-files"}
+FIXTURES = {"echo", "slow", "out-of-scope", "oversize", "forbidden-path", "too-many-files", "max-size"}
 SLOW_SECONDS = 90  # bounded in-flight window for E10; job timeout is 5 min
 
 
@@ -29,6 +29,8 @@ def build_files(pkg, rnd, spec_text, rec):
         files[f"{base}/big.bin"] = b"x" * (rec["max_patch_bytes"] + 1)
     elif fixture == "forbidden-path":
         files[".github/workflows/injected.yml"] = b"on: push\n"
+    elif fixture == "max-size":  # exactly at the approved byte limit (positive boundary test)
+        files[f"{base}/pad.bin"] = b"p" * (rec["max_patch_bytes"] - len(body))
     elif fixture == "too-many-files":
         for i in range(rec["max_files"] + 1):
             files[f"{base}/f{i}.txt"] = b"x\n"
@@ -49,8 +51,9 @@ def fixture_of(spec_text):
 def run_worker(env, api, repo_dir, now=None, sleep_fn=time.sleep):
     now = now or utcnow()
     pkg, rnd, blob = env["PACKAGE_ID"], int(env["ROUND"]), env["AUTHZ_BLOB"]
-    rec = validate_record(load_json_strict(open(os.path.join(repo_dir, f"authz/{pkg}.json")).read(), "record"), pkg, now)
-    spec = open(os.path.join(repo_dir, rec["spec_path"]), "rb").read()
+    sha = env.get("GITHUB_SHA", "HEAD")
+    rec = validate_record(load_json_strict(read_tree_file(repo_dir, sha, f"authz/{pkg}.json").decode(), "record"), pkg, now)
+    spec = read_tree_file(repo_dir, sha, rec["spec_path"])
     if sha256_hex(spec) != rec["spec_sha256"]:
         raise Reject("SPEC_MISMATCH", "worker spec hash")
     live_check(api, pkg, blob)

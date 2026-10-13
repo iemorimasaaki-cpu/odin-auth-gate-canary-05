@@ -38,13 +38,20 @@ class LintTests(unittest.TestCase):
             "uses": base.replace("      - id: g", "      - uses: actions/checkout@v4\n      - id: g", 1),
             "latest runner": base.replace("ubuntu-24.04", "ubuntu-latest", 1),
             "timeout": base.replace("timeout-minutes: 5", "timeout-minutes: 30", 1),
-            "expr in run": base.replace("run: PYTHONPATH=tools python3 -B -m odin_gate gate", "run: echo ${{ inputs.package_id }}", 1),
+            "expr in run": base.replace("-m odin_gate gate", "-m odin_gate gate ${{ inputs.package_id }}", 1),
             "no top perms": base.replace("permissions: {}\n", "", 1),
             "all branches": base.replace("branches: [main]", "branches: ['**']", 1),
+            "format secrets": base.replace("TRIGGERING_ACTOR:", "FOO: ${{ format('{0}', secrets.X) }}\n          TRIGGERING_ACTOR:", 1),
+            "always publish": base.replace("    needs: [gate, worker, verify]\n", "    needs: [gate, worker, verify]\n    if: always()\n", 1),
+            "continue-on-error": base.replace("      - id: g", "      - continue-on-error: true\n        id: g", 1),
+            "shell key": base.replace("      - id: g", "      - shell: bash\n        id: g", 1),
+            "push tags": base.replace("    branches: [main]", "    branches: [main]\n    tags: ['*']", 1),
+            "job env secrets": base.replace("    timeout-minutes: 5\n    permissions:\n      contents: read\n      pull-requests: read", "    timeout-minutes: 5\n    env:\n      K: ${{ secrets.K }}\n    permissions:\n      contents: read\n      pull-requests: read", 1),
+            "extra job": base + "  extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    permissions:\n      contents: read\n    steps:\n      - run: echo hi\n",
             "no paths": re.sub(r"    paths:.*\n", "", base, count=1),
         }
         for name, text in muts.items():
-            self.assertNotEqual(text, base, f"mutation {name} did not change file")
+            self.assertTrue(text != base, f"mutation {name} did not change file")
             self.assertTrue(self.lint_text(text), f"lint missed: {name}")
 
     def test_no_python_in_repo_root(self):

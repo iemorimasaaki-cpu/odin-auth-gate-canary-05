@@ -8,7 +8,7 @@ Standard library Python 3; GitHub-hosted `ubuntu-24.04`; every job `timeout-minu
 → `push` → **gate** (read) → **claim** (create-only tag) → **worker** (echo fixture, read) → **verify** (read) → **publish** (result branch + evidence tag).
 Owner's routine action: one PR merge. Output is a branch `odin/<pkg>/r<N>`; nothing is merged or deployed.
 
-## Enumerated triggers (lint-enforced: `python -m odin_gate.lint_workflows`)
+## Enumerated triggers (checked by `python -m odin_gate.lint_workflows` + tests at review time; NOT executed at runtime — runtime enforcement is the gate's GATE_CHANGE rule)
 | # | Trigger | Constraint |
 |---|---|---|
 | T1 | `push` | branches `[main]`, paths `authz/**`, `specs/**` |
@@ -31,7 +31,7 @@ Recursion: no job dispatches a workflow; `GITHUB_TOKEN` pushes do not trigger wo
 `authz/<pkg>.json` (strict schema, unknown/duplicate keys rejected) pins: baseline_sha, spec_sha256, scope under `synthetic-out/<pkg>/`, max files/bytes/rounds, validity window (<= 7 days, upper bound exclusive), status.
 Launch requires ALL of: repo/ref/event match; run_attempt <= 2 (second only while no claim exists); change set is exactly {A authz/<pkg>.json, A specs/<pkg>.md}; commit is the merge commit of a merged PR into main whose `merged_by` is the owner (API-derived, not actor-derived); baseline is an ancestor and baseline..launch touches only authz/specs files; spec bytes hash matches; record on main right now equals the launched blob (revocation/stale check).
 Gate-code changes: any path outside authz/specs → `GATE_CHANGE`, never a launch. Modifications of an existing record: only a pure approved→revoked flip is accepted (recorded as NOOP); anything else → `AUTHZ_AMEND`.
-Residual (inherent): the gate code at the launched commit judges itself; the baseline/ancestor check and branch protection are what stop a mixed commit. An Owner who deliberately merges gate changes is the trust root.
+Judge independence: every job runs `tools/` copied from the PRE-push tree (`github.event.before`; main tip for dispatch), so a commit cannot supply its own gate logic. This closes the mixed tools+authz commit. It does NOT close a commit that edits `.github/workflows/gate.yml` itself: GitHub runs the workflow file from the pushed commit, and a modified workflow can skip the gate. That case rests on Owner custody (what the Owner merges) and, if available on a personal repo, a push/path ruleset restricting `.github/**`; E3b observes it. Residual, stated, not claimed as mechanical.
 
 ## Verification
 Verify re-derives everything from actual decoded bytes (declared size/hash only cross-checked): path normalization, forbidden prefixes, case-fold collisions, scope prefix match, file count, total bytes. Publish re-runs the same verification, re-checks revocation, requires the claim to exist, parent commit = approved baseline, create-only refs.
@@ -49,16 +49,17 @@ Verify re-derives everything from actual decoded bytes (declared size/hash only 
 | Exp | Method | Runs |
 |---|---|---|
 | E1 | observe actor/triggering_actor/initiator on push and dispatch runs (no Environment approver) | 0 extra |
-| E2 | re-run attempt 2 after claim → DUPLICATE; attempt 3 → RERUN | 2 |
+| E2 | full re-run attempt 2 after claim → DUPLICATE; attempt 3 → RERUN; also 'Re-run failed jobs' behaviour (does the gate re-run?) | 2-3 |
+| E3b | benign comment-only workflow edit bundled with an authz record — expected to LAUNCH (documents the residual above), BLOCK-class result | 1 |
 | E3 | push launches for GATE_CHANGE, NO_AUTHZ(spec-only), AUTHZ_AMEND, SPEC_MISMATCH, BASELINE_DRIFT, EXPIRED; dispatch ROUND_GAP/ROUND_LIMIT/ACTOR n/a | ~8 |
 | E4 | claim + evidence tags created by GITHUB_TOKEN; update/delete attempts refused by tag ruleset | 0 extra |
 | E5 | direct push to main refused (no run); merges via squash / merge-commit / rebase record merged_by and merge_commit_sha behavior | 2 extra |
-| E6 | fixtures out-of-scope, forbidden-path, oversize rejected by verify; job-level permission denial probes | 3 |
+| E6 | fixtures out-of-scope, forbidden-path, oversize rejected by verify; max-size fixture passes end to end (job output/env size limits); job-level permission denial probes | 4 |
 | E7 | two simultaneous dispatches of the same round → exactly one claim | 2 |
 | E8 | environment branch policy: confirm the worker job ran under `synthetic-worker` restricted to main; no Action used | 0 extra |
 | E9 | create issue / comment / label / PR-comment → run count unchanged | 0 |
 | E10 | revoke record; dispatch → REVOKED; `slow` fixture revoked mid-flight stops at next check | 3 |
-Expected ≈ 21 of 30 runs; reserve for re-tests. Each Owner action is a PR merge or UI click; the report lists them as batches.
+Expected ≈ 24 of 30 runs; reserve for re-tests. Each Owner action is a PR merge or UI click; the report lists them as batches.
 NOT_TESTED by design: MERGER_MISMATCH (needs a second merging identity).
 
 ## Known limits

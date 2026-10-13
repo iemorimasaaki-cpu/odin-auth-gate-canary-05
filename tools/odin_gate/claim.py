@@ -3,7 +3,7 @@ import json
 import os
 
 from .common import (EXPECTED_REPO, PKG_RE, Reject, claim_ref, live_check, sha256_hex, summary, utcnow,
-                     validate_record, write_output, load_json_strict, GitHubAPI)
+                     validate_record, write_output, load_json_strict, GitHubAPI, read_tree_file)
 
 
 def run_claim(env, api, repo_dir, now=None):
@@ -11,7 +11,7 @@ def run_claim(env, api, repo_dir, now=None):
     pkg, rnd, blob = env["PACKAGE_ID"], int(env["ROUND"]), env["AUTHZ_BLOB"]
     if not PKG_RE.match(pkg):
         raise Reject("SCHEMA", "package_id")
-    rec = validate_record(load_json_strict(open(os.path.join(repo_dir, f"authz/{pkg}.json")).read(), "record"), pkg, now)
+    rec = validate_record(load_json_strict(read_tree_file(repo_dir, env.get("GITHUB_SHA", "HEAD"), f"authz/{pkg}.json").decode(), "record"), pkg, now)
     live_check(api, pkg, blob)  # revocation between GATE and CLAIM is caught here
     msg = json.dumps({
         "kind": "claim", "package_id": pkg, "round": rnd, "authz_blob_sha": blob,
