@@ -5,7 +5,7 @@ import re
 import time
 
 from .common import (AUTHZ_PATH_RE, EXPECTED_REPO, OWNER_LOGIN, PKG_RE, SPEC_PATH_RE, ZERO_SHA, Reject,
-                     claim_ref, git, live_check, load_json_strict, read_tree_file, sha256_hex, summary, utcnow,
+                     claim_ref, evidence_ref, git, live_check, load_json_strict, read_tree_file, sha256_hex, summary, utcnow,
                      validate_record, write_output)
 
 
@@ -156,6 +156,16 @@ def _evaluate(env, api, repo_dir, now, d):
         msg = api.get_tag_message(prev_sha)
         if load_json_strict(msg, "prior claim").get("authz_blob_sha") != d["authz_blob"]:
             raise Reject("STALE_AUTHZ", "record changed since round 1")
+        # R4: a claim alone is not enough; the previous round must have completed (evidence written) so a
+        # failed round cannot make the next dispatch burn a fresh claim and then die at publish.
+        ev_sha = api.get_ref_sha(f"tags/{evidence_ref(pkg, rnd - 1)}")
+        if ev_sha is None:
+            raise Reject("ROUND_GAP", f"no evidence for round {rnd - 1} (previous round did not complete)")
+        ev = load_json_strict(api.get_tag_message(ev_sha), "prior evidence")
+        if ev.get("kind") != "evidence" or ev.get("package_id") != pkg or ev.get("round") != rnd - 1:
+            raise Reject("ROUND_GAP", "previous evidence record is malformed")
+        if ev.get("authz_blob_sha") != d["authz_blob"]:
+            raise Reject("STALE_AUTHZ", "record changed since previous evidence")
     live_check(api, pkg, d["authz_blob"])
     if api.get_ref_sha(f"tags/{claim_ref(pkg, rnd)}") is not None:
         d["decision"], d["code"] = "DUPLICATE", "DUPLICATE"

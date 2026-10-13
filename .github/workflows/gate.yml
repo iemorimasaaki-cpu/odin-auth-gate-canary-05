@@ -26,7 +26,7 @@ env:
   PYTHONDONTWRITEBYTECODE: '1'
   # Tree hash of tools/ that every run must see in its trusted (pre-push) copy. A tools change therefore
   # needs a deliberate edit of this line (a workflow change) and otherwise fails the next run closed.
-  ODIN_TOOLS_TREE: ee8e1f803ccb8b23c3ee6115def8664aeb8055c8
+  ODIN_TOOLS_TREE: df2c2fe9d93b1c35213ca7e16bf8ad354e442c23
 
 jobs:
   gate:  # READ-ONLY. No secrets. Never writes.

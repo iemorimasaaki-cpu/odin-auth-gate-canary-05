@@ -185,9 +185,13 @@ class DispatchTests(unittest.TestCase):
                     "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": self.sha, "GITHUB_ACTOR": OWNER_LOGIN,
                     "TRIGGERING_ACTOR": OWNER_LOGIN, "GITHUB_RUN_ATTEMPT": "1", "INPUT_PACKAGE_ID": PKG, "INPUT_ROUND": "2"}
 
-    def prior_claim(self, blob=None):
+    def prior_claim(self, blob=None, evidence=True):
         t = self.api.create_tag_object("c", json.dumps({"authz_blob_sha": blob or self.blob}), self.sha)
         self.api.create_ref(f"refs/tags/odin/claim/{PKG}/r1", t)
+        if evidence:
+            e = self.api.create_tag_object("e", json.dumps({"kind": "evidence", "package_id": PKG, "round": 1,
+                                                            "authz_blob_sha": blob or self.blob}), self.sha)
+            self.api.create_ref(f"refs/tags/odin/evidence/{PKG}/r1", e)
 
     def test_round_gap(self):
         self.assertEqual(ev(self.r, self.api, self.env)["code"], "ROUND_GAP")

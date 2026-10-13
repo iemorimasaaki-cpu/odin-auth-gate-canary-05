@@ -47,7 +47,7 @@ def verify_files(files, rec):
         if any(path.startswith(p) for p in FORBIDDEN_PREFIXES):
             raise Reject("FORBIDDEN_PATH", path)
         segs = path.split("/")
-        if len(path) > 200 or not all(SEG_RE.match(s) and not s.endswith(".") and not s.startswith("git~") for s in segs):
+        if len(path) > 200 or not all(SEG_RE.match(s) and not s.endswith(".") for s in segs):
             raise Reject("BAD_PATH", repr(path))
         if not any(path == s or path.startswith(s + "/") for s in scopes):
             raise Reject("OUT_OF_SCOPE", path)
