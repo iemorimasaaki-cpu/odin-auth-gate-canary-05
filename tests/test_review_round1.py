@@ -180,3 +180,18 @@ class Round2Tests(unittest.TestCase):
         with self.assertRaises(Reject) as cm:
             publish.run_publish(env, api, r.d, b, NOW)
         self.assertEqual(cm.exception.code, "ALREADY_PUBLISHED")
+
+    def test_resume_requires_same_tree(self):
+        r = Repo(); sha = r.authorize(); api = FakeAPI(); blob = api.set_main_record(r)
+        api.create_ref(f"refs/tags/{claim_ref(PKG, 1)}", "c")
+        env = {"PACKAGE_ID": PKG, "ROUND": "1", "AUTHZ_BLOB": blob, "GITHUB_SHA": sha, "GITHUB_RUN_ID": "9",
+               "GITHUB_RUN_ATTEMPT": "1", "GITHUB_EVENT_NAME": "push", "GITHUB_ACTOR": "iemorimasaaki-cpu"}
+        b = worker_echo.make_bundle(worker_echo.build_files(PKG, 1, "x", record(PKG)))
+        publish.run_publish(env, api, r.d, b, NOW)
+        del api.refs[f"refs/tags/odin/evidence/{PKG}/r1"]
+        head = api.refs[f"refs/heads/odin/{PKG}/r1"]
+        msg, tree, parents = api.commit_objs[head]
+        api.commit_objs[head] = (msg, "treeOTHER", parents)  # right parent, different content
+        with self.assertRaises(Reject) as cm:
+            publish.run_publish(env, api, r.d, b, NOW)
+        self.assertEqual(cm.exception.code, "ALREADY_PUBLISHED")
