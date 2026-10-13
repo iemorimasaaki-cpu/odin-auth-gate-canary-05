@@ -219,6 +219,9 @@ class GitHubAPI:
     def create_blob(self, content_b64):
         return self.request("POST", "/git/blobs", {"content": content_b64, "encoding": "base64"})["sha"]
 
+    def get_commit_parents(self, commit_sha):
+        return [p["sha"] for p in self.request("GET", f"/git/commits/{commit_sha}")["parents"]]
+
     def get_commit_tree(self, commit_sha):
         return self.request("GET", f"/git/commits/{commit_sha}")["tree"]["sha"]
 

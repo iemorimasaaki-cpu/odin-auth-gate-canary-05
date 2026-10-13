@@ -53,6 +53,10 @@ def verify_files(files, rec):
             raise Reject("OUT_OF_SCOPE", path)
         total += len(raw)
         manifest.append({"path": path, "size": len(raw), "sha256": sha256_hex(raw)})
+    paths = set(files)
+    for p in paths:  # a file and a directory of the same name would make tree creation fail after the claim
+        if any(q.startswith(p + "/") for q in paths):
+            raise Reject("PATH_COLLISION", p)
     if total > rec["max_patch_bytes"]:
         raise Reject("TOO_LARGE", f"{total} > {rec['max_patch_bytes']}")
     return {"schema": "odin-verified/1", "files": manifest, "total_bytes": total}

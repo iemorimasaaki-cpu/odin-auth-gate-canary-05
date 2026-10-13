@@ -51,6 +51,8 @@ def lint(path):
             problems.append(f"{path}: expression references secrets/vars/env: {m.group(0)[:60]}")
     if wf.get("permissions") != {}:
         problems.append(f"{path}: workflow-level permissions must be {{}}")
+    if set(wf.get("env") or {}) != {"PYTHONDONTWRITEBYTECODE", "ODIN_TOOLS_TREE"}:
+        problems.append(f"{path}: workflow env keys must be exactly PYTHONDONTWRITEBYTECODE, ODIN_TOOLS_TREE")
     if SECRET_RE.search(text):
         problems.append(f"{path}: references secrets / model credentials")
     if re.search(r"self-hosted|larger|ubuntu-latest", text):
@@ -77,6 +79,10 @@ def lint(path):
         if not isinstance(job.get("timeout-minutes"), int) or job["timeout-minutes"] > 5:
             problems.append(f"{path}:{name}: timeout-minutes must be <= 5")
         for i, step in enumerate(job.get("steps", [])):
+            if "odin_gate" in step.get("run", "") and "python3 -P -B -m odin_gate" not in step["run"]:
+                problems.append(f"{path}:{name}:step{i}: odin_gate must run with python3 -P -B (no cwd on sys.path)")
+            if "git archive" in step.get("run", "") and "ODIN_TOOLS_TREE" not in step["run"]:
+                problems.append(f"{path}:{name}:step{i}: trusted tools copy must be pin-checked")
             if EXPR_RE.search(step.get("run", "")):
                 problems.append(f"{path}:{name}:step{i}: expression inside run: (use env:)")
             for k in step:

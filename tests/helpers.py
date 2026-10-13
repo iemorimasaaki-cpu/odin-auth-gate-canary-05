@@ -123,6 +123,9 @@ class FakeAPI:
         self.blobs[i] = raw
         return i
 
+    def get_commit_parents(self, sha):
+        return self.commit_objs[sha][2] if sha in self.commit_objs else []
+
     def get_commit_tree(self, sha):
         return self.commit_objs[sha][1] if sha in self.commit_objs else "t" * 40
 

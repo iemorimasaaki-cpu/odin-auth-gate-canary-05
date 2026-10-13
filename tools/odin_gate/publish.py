@@ -38,6 +38,7 @@ def run_publish(env, api, repo_dir, bundle_text, now=None):
         # on the approved baseline and no evidence exists yet; otherwise it is a genuine duplicate.
         existing = api.get_ref_sha(f"heads/{branch}")
         if existing is None or api.get_commit_tree(existing) != tree or \
+                api.get_commit_parents(existing) != [baseline] or \
                 api.get_ref_sha(f"tags/{evidence_ref(pkg, rnd)}") is not None:
             raise Reject("ALREADY_PUBLISHED", branch)
         commit = existing

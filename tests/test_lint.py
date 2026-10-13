@@ -48,6 +48,9 @@ class LintTests(unittest.TestCase):
             "push tags": base.replace("    branches: [main]", "    branches: [main]\n    tags: ['*']", 1),
             "job env secrets": base.replace("    timeout-minutes: 5\n    permissions:\n      contents: read\n      pull-requests: read", "    timeout-minutes: 5\n    env:\n      K: ${{ secrets.K }}\n    permissions:\n      contents: read\n      pull-requests: read", 1),
             "extra job": base + "  extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    permissions:\n      contents: read\n    steps:\n      - run: echo hi\n",
+            "no -P": base.replace("python3 -P -B -m odin_gate gate", "python3 -B -m odin_gate gate", 1),
+            "no pin check": base.replace('test "$(git rev-parse "$BASE:tools")" = "$ODIN_TOOLS_TREE" || { echo "tools tree differs from pinned hash" >&2; exit 1; }\n', "", 1),
+            "extra workflow env": base.replace("  ODIN_TOOLS_TREE:", "  EXTRA: 1\n  ODIN_TOOLS_TREE:", 1),
             "no paths": re.sub(r"    paths:.*\n", "", base, count=1),
         }
         for name, text in muts.items():

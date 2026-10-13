@@ -128,3 +128,53 @@ class MaxSizeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Round2Tests(unittest.TestCase):
+    ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+
+    def test_pinned_tools_tree_matches_repo(self):
+        import re
+        wf = open(os.path.join(self.ROOT, ".github/workflows/gate.yml")).read()
+        pin = re.search(r"ODIN_TOOLS_TREE: ([0-9a-f]{40})\n", wf)
+        self.assertIsNotNone(pin, "workflow pin missing or placeholder")
+        # compare against the COMMITTED tools tree of the working HEAD (tests run on a clean checkout)
+        out = sh(self.ROOT, "git", "rev-parse", "HEAD:tools")
+        dirty = sh(self.ROOT, "git", "status", "--porcelain", "--", "tools")
+        self.assertEqual(dirty, "", "tools/ has uncommitted changes; pin cannot be checked")
+        self.assertEqual(pin.group(1), out)
+
+    def test_cwd_shadow_module_is_not_loaded_with_dash_P(self):
+        import tempfile
+        d = tempfile.mkdtemp(); marker = os.path.join(d, "PWNED")
+        for mod in ("json", "base64", "re", "subprocess", "hashlib", "datetime"):
+            open(os.path.join(d, mod + ".py"), "w").write(f"open({marker!r}, 'w').write('x')\n")
+        tools = os.path.join(self.ROOT, "tools")
+        subprocess.run([sys.executable, "-P", "-B", "-m", "odin_gate", "verify"], cwd=d, env={"PYTHONPATH": tools},
+                       capture_output=True)
+        self.assertFalse(os.path.exists(marker), "cwd module was imported despite -P")
+        # control: WITHOUT -P the same shadowing does execute (proves the test can detect it)
+        subprocess.run([sys.executable, "-B", "-m", "odin_gate", "verify"], cwd=d, env={"PYTHONPATH": tools},
+                       capture_output=True)
+        self.assertTrue(os.path.exists(marker))
+
+    def test_file_directory_collision_rejected(self):
+        rec = record(PKG)
+        with self.assertRaises(Reject) as cm:
+            verify.verify_files({f"synthetic-out/{PKG}/a": b"1", f"synthetic-out/{PKG}/a/b": b"2"}, rec)
+        self.assertEqual(cm.exception.code, "PATH_COLLISION")
+
+    def test_resume_requires_baseline_parent(self):
+        r = Repo(); sha = r.authorize(); api = FakeAPI(); blob = api.set_main_record(r)
+        api.create_ref(f"refs/tags/{claim_ref(PKG, 1)}", "c")
+        env = {"PACKAGE_ID": PKG, "ROUND": "1", "AUTHZ_BLOB": blob, "GITHUB_SHA": sha, "GITHUB_RUN_ID": "9",
+               "GITHUB_RUN_ATTEMPT": "1", "GITHUB_EVENT_NAME": "push", "GITHUB_ACTOR": "iemorimasaaki-cpu"}
+        b = worker_echo.make_bundle(worker_echo.build_files(PKG, 1, "x", record(PKG)))
+        publish.run_publish(env, api, r.d, b, NOW)
+        del api.refs[f"refs/tags/odin/evidence/{PKG}/r1"]
+        head = api.refs[f"refs/heads/odin/{PKG}/r1"]
+        msg, tree, _ = api.commit_objs[head]
+        api.commit_objs[head] = (msg, tree, ["d" * 40])  # same tree, different parent
+        with self.assertRaises(Reject) as cm:
+            publish.run_publish(env, api, r.d, b, NOW)
+        self.assertEqual(cm.exception.code, "ALREADY_PUBLISHED")
